@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prime Void Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        pre {
+            background: #f8f8f8;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Prime Void Demo</h1>
+        <div>
+            <button onclick="makeGetRequest()">GET Request</button>
+            <button onclick="makePostRequest()">POST Request</button>
+            <button onclick="testCache()">Test Cache</button>
+            <button onclick="testTimeout()">Test Timeout</button>
+        </div>
+        <h3>Response:</h3>
+        <pre id="response">Click a button to make a request...</pre>
+    </div>
+
+    <script type="module">
+        import { createClient } from '../dist/index.js';
+
+        // Create client instance
+        const client = createClient({
+            baseURL: 'https://jsonplaceholder.typicode.com',
+            timeout: 5000,
+            cache: true
+        });
+
+        // Add to window for button access
+        window.client = client;
+        
+        // GET request
+        window.makeGetRequest = async () => {
+            try {
+                const response = await client.get('/posts/1');
+                displayResponse(response);
+            } catch (error) {
+                displayError(error);
+            }
+        };
+
+        // POST request
+        window.makePostRequest = async () => {
+            try {
+                const response = await client.post('/posts', {
+                    title: 'foo',
+                    body: 'bar',
+                    userId: 1
+                });
+                displayResponse(response);
+            } catch (error) {
+                displayError(error);
+            }
+        };
+
+        // Test cache
+        window.testCache = async () => {
+            try {
+                console.time('First Request');
+                const response1 = await client.get('/posts/1');
+                console.timeEnd('First Request');
+                
+                console.time('Cached Request');
+                const response2 = await client.get('/posts/1');
+                console.timeEnd('Cached Request');
+                
+                displayResponse({
+                    firstRequest: response1.data,
+                    cachedRequest: response2.data
+                });
+            } catch (error) {
+                displayError(error);
+            }
+        };
+
+        // Test timeout
+        window.testTimeout = async () => {
+            try {
+                const response = await client.get('/posts/1', {
+                    timeout: 1 // 1ms timeout to force error
+                });
+                displayResponse(response);
+            } catch (error) {
+                displayError(error);
+            }
+        };
+
+        // Helper functions
+        function displayResponse(response) {
+            document.getElementById('response').textContent = 
+                JSON.stringify(response, null, 2);
+        }
+
+        function displayError(error) {
+            document.getElementById('response').textContent = 
+                `Error: ${error.message}\n\n${JSON.stringify(error, null, 2)}`;
+        }
+    </script>
+</body>
+</html>
