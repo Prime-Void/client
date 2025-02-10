@@ -1,4 +1,7 @@
+import { BatchConfig } from './batch';
 import { CacheConfig } from './cache';
+import { CircuitBreakerConfig } from './circuit-breaker';
+import { CompressionConfig } from './compression';
 import { Logger } from './logger/types';
 import { ProgressConfig } from './progress';
 import { QueueConfig } from './queue/types';
@@ -22,6 +25,9 @@ export interface RequestConfig extends ProgressConfig {
   responseType?: 'json' | 'text' | 'blob' | 'arraybuffer';
   queue?: boolean | QueueConfig;
   rateLimit?: boolean | RateLimitConfig;
+  batch?: boolean | BatchConfig;
+  compression?: boolean | CompressionConfig;
+  circuitBreaker?: boolean | CircuitBreakerConfig;
 }
 
 export interface ClientConfig {
@@ -33,6 +39,9 @@ export interface ClientConfig {
   cache?: boolean | CacheConfig;
   queue?: boolean | QueueConfig;
   rateLimit?: boolean | RateLimitConfig;
+  batch?: boolean | BatchConfig;
+  compression?: boolean | CompressionConfig;
+  circuitBreaker?: boolean | CircuitBreakerConfig;
   logger?: Logger;
 }
 
