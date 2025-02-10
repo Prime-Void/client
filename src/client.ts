@@ -1,3 +1,5 @@
+import { CacheStore, MemoryStore } from './cache';
+import { ProgressTracker } from './progress';
 import { ClientConfig, HttpError, HttpMethod, RequestConfig, RequestInterceptor, ResponseInterceptor } from './types';
 
 /**
@@ -9,6 +11,7 @@ export class HttpClient {
   private timeout: number;
   private retries: number;
   private retryDelay: number;
+  private cache?: CacheStore;
   private requestInterceptors: RequestInterceptor[] = [];
   private responseInterceptors: ResponseInterceptor[] = [];
 
@@ -21,6 +24,10 @@ export class HttpClient {
     this.timeout = config.timeout ?? 30000;
     this.retries = config.retries ?? 0;
     this.retryDelay = config.retryDelay ?? 1000;
+    
+    if (config.cache) {
+      this.cache = new MemoryStore();
+    }
   }
 
   /**
@@ -47,6 +54,22 @@ export class HttpClient {
         this.responseInterceptors.splice(index, 1);
       }
     };
+  }
+
+  /**
+   * Set cache store implementation
+   */
+  setCacheStore(store: CacheStore): void {
+    this.cache = store;
+  }
+
+  /**
+   * Clear the cache
+   */
+  async clearCache(): Promise<void> {
+    if (this.cache) {
+      await this.cache.clear();
+    }
   }
 
   /**
@@ -104,6 +127,14 @@ export class HttpClient {
     };
 
     try {
+      // Check cache first
+      if (this.shouldUseCache(currentConfig)) {
+        const cachedResponse = await this.getCachedResponse(currentConfig);
+        if (cachedResponse) {
+          return cachedResponse as T;
+        }
+      }
+
       // Apply request interceptors
       currentConfig = await this.applyRequestInterceptors(currentConfig);
 
@@ -116,22 +147,57 @@ export class HttpClient {
       const timeoutId = setTimeout(() => controller.abort(), currentConfig.timeout ?? this.timeout);
       const signal = currentConfig.signal ?? controller.signal;
 
-      let response = await fetch(currentConfig.url!, {
-        method: currentConfig.method!,
+      // Create request
+      const requestInit: RequestInit = {
+        method: currentConfig.method,
         headers: currentConfig.headers,
-        body: currentConfig.data ? JSON.stringify(currentConfig.data) : undefined,
         signal,
-      });
+      };
+
+      // Handle request body and upload progress
+      if (currentConfig.data) {
+        if (currentConfig.onUploadProgress && typeof currentConfig.data === 'object') {
+          const body = JSON.stringify(currentConfig.data);
+          const stream = new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(body));
+              controller.close();
+            },
+          });
+
+          const tracker = new ProgressTracker(currentConfig.onUploadProgress);
+          requestInit.body = tracker.wrapReader(stream, body.length);
+        } else {
+          requestInit.body = JSON.stringify(currentConfig.data);
+        }
+      }
+
+      let response = await fetch(currentConfig.url!, requestInit);
 
       clearTimeout(timeoutId);
+
+      // Handle download progress
+      if (currentConfig.onDownloadProgress) {
+        const contentLength = Number(response.headers.get('content-length') ?? 0);
+        const tracker = new ProgressTracker(currentConfig.onDownloadProgress);
+        response = new Response(
+          tracker.wrapReader(response.body!, contentLength),
+          response
+        );
+      }
 
       // Apply response interceptors
       response = await this.applyResponseInterceptors(response);
 
-      const responseData = await this.parseResponse(response);
+      const responseData = await this.parseResponse(response, currentConfig.responseType);
 
       if (!response.ok) {
         throw new HttpError(response.status, response.statusText, responseData, currentConfig);
+      }
+
+      // Cache the successful response
+      if (this.shouldUseCache(currentConfig)) {
+        await this.cacheResponse(currentConfig, responseData, response.headers);
       }
 
       // Transform response data if needed
@@ -150,6 +216,57 @@ export class HttpClient {
       }
       throw error;
     }
+  }
+
+  private shouldUseCache(config: RequestConfig): boolean {
+    return (
+      !!this.cache &&
+      (config.cache === true || (typeof config.cache === 'object' && config.method === 'GET'))
+    );
+  }
+
+  private async getCachedResponse(config: RequestConfig): Promise<unknown | undefined> {
+    if (!this.cache) return undefined;
+
+    const key = this.getCacheKey(config);
+    const cached = await this.cache.get(key);
+
+    if (cached) {
+      const maxAge = typeof config.cache === 'object' ? config.cache.maxAge : undefined;
+      if (!maxAge || Date.now() - cached.timestamp <= maxAge) {
+        return cached.data;
+      }
+      await this.cache.delete(key);
+    }
+
+    return undefined;
+  }
+
+  private async cacheResponse(
+    config: RequestConfig,
+    data: unknown,
+    headers: Headers
+  ): Promise<void> {
+    if (!this.cache) return;
+
+    const key = this.getCacheKey(config);
+    const headerObj: Record<string, string> = {};
+    headers.forEach((value, key) => {
+      headerObj[key] = value;
+    });
+
+    await this.cache.set(key, {
+      data,
+      timestamp: Date.now(),
+      headers: headerObj,
+    });
+  }
+
+  private getCacheKey(config: RequestConfig): string {
+    if (typeof config.cache === 'object' && config.cache.key) {
+      return config.cache.key(config);
+    }
+    return `${config.method}:${config.url}:${JSON.stringify(config.params)}`;
   }
 
   /**
@@ -189,9 +306,25 @@ export class HttpClient {
   }
 
   /**
-   * Parse response based on content type
+   * Parse response based on content type or specified response type
    */
-  private async parseResponse(response: Response): Promise<any> {
+  private async parseResponse(
+    response: Response,
+    responseType?: 'json' | 'text' | 'blob' | 'arraybuffer'
+  ): Promise<any> {
+    if (responseType) {
+      switch (responseType) {
+        case 'json':
+          return response.json();
+        case 'text':
+          return response.text();
+        case 'blob':
+          return response.blob();
+        case 'arraybuffer':
+          return response.arrayBuffer();
+      }
+    }
+
     const contentType = response.headers.get('content-type');
     if (contentType?.includes('application/json')) {
       return response.json();

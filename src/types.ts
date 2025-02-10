@@ -1,6 +1,9 @@
+import { CacheConfig } from './cache';
+import { ProgressConfig } from './progress';
+
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
-export interface RequestConfig {
+export interface RequestConfig extends ProgressConfig {
   method?: HttpMethod;
   url?: string;
   headers?: Record<string, string>;
@@ -12,6 +15,8 @@ export interface RequestConfig {
   transformRequest?: RequestTransformer;
   transformResponse?: ResponseTransformer;
   data?: unknown;
+  cache?: boolean | CacheConfig;
+  responseType?: 'json' | 'text' | 'blob' | 'arraybuffer';
 }
 
 export interface ClientConfig {
@@ -20,6 +25,7 @@ export interface ClientConfig {
   timeout?: number;
   retries?: number;
   retryDelay?: number;
+  cache?: boolean | CacheConfig;
 }
 
 export interface RequestInterceptor {
@@ -51,4 +57,9 @@ export interface RetryConfig {
   retries: number;
   retryDelay: number;
   shouldRetry?: (error: unknown) => boolean;
+}
+
+export interface RequestOptions {
+  cache?: boolean | CacheConfig;
+  signal?: AbortSignal;
 }
