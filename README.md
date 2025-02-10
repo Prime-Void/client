@@ -1,18 +1,17 @@
 # Prime Void HTTP Client
 
-A powerful, type-safe HTTP client for JavaScript/TypeScript with advanced features.
+A powerful and modern HTTP client for TypeScript/JavaScript applications, built on top of the Fetch API with additional features like request caching, progress tracking, and interceptors.
 
 ## Features
 
-- 🚀 Modern and lightweight
-- 💪 Fully type-safe with TypeScript
-- 🔄 Advanced request/response interceptors
-- 📦 Smart caching system
+- 🚀 Modern Fetch API based implementation
+- 📦 Built-in request caching
+- 📊 Upload and download progress tracking
+- 🔄 Request/response interceptors
+- 🔍 Automatic response type detection
 - 🔁 Configurable retry mechanism
-- ⚡ Progress tracking
-- 🎯 Request cancellation
-- 🛡️ Comprehensive error handling
-- 🔌 Extensible middleware system
+- 💪 Full TypeScript support
+- 🎯 Zero dependencies
 
 ## Installation
 
@@ -23,141 +22,158 @@ npm install prime-void
 ## Quick Start
 
 ```typescript
-import { Client } from 'prime-void';
+import { HttpClient } from 'prime-void';
 
-const client = new Client({
-    baseURL: 'https://api.example.com',
-    timeout: 5000,
-    retry: {
-        attempts: 3,
-        delay: 1000,
-        backoffType: 'exponential'
-    },
-    cache: {
-        ttl: 60000,
-        storage: 'memory'
-    }
+const client = new HttpClient({
+  baseURL: 'https://api.example.com',
+  timeout: 5000,
+  retries: 3
 });
 
 // Simple GET request
-const response = await client.get('/users');
+const users = await client.get('/users');
 
 // POST request with data
-const user = await client.post('/users', {
-    name: 'John Doe',
-    email: 'john@example.com'
-});
-
-// Request with progress tracking
-const response = await client.get('/large-file', {
-    onDownloadProgress: (progress) => {
-        console.log(`Downloaded ${progress.percentage}%`);
-    }
+const newUser = await client.post('/users', {
+  name: 'John Doe',
+  email: 'john@example.com'
 });
 ```
 
 ## Advanced Features
 
-### Caching
+### Request Caching
 
 ```typescript
-const client = new Client({
-    cache: {
-        ttl: 60000, // 1 minute
-        storage: 'localStorage',
-        maxSize: 100,
-        staleWhileRevalidate: true
-    }
+// Enable caching for all GET requests
+const client = new HttpClient({
+  baseURL: 'https://api.example.com',
+  cache: true
 });
+
+// Configure cache for specific requests
+const users = await client.get('/users', {
+  cache: {
+    maxAge: 60000, // Cache for 1 minute
+    key: (config) => `users-${config.params?.page}` // Custom cache key
+  }
+});
+
+// Clear cache when needed
+await client.clearCache();
 ```
 
-### Retry Mechanism
+### Progress Tracking
 
 ```typescript
-const client = new Client({
-    retry: {
-        attempts: 3,
-        delay: 1000,
-        backoffType: 'exponential',
-        shouldRetry: (error) => error.response?.status >= 500
-    }
+// Track upload and download progress
+const response = await client.post('/upload', formData, {
+  onUploadProgress: (event) => {
+    console.log(`Upload progress: ${event.percent}%`);
+  },
+  onDownloadProgress: (event) => {
+    console.log(`Download progress: ${event.percent}%`);
+  }
 });
 ```
 
 ### Interceptors
 
 ```typescript
-client.interceptors.add({
-    id: 'auth',
-    onRequest: async (config) => {
-        config.headers['Authorization'] = 'Bearer token';
-        return config;
-    },
-    onResponse: async (response) => {
-        // Process response
-        return response;
-    }
+// Add request interceptor
+client.addRequestInterceptor({
+  onRequest: async (config) => {
+    // Add authentication token
+    config.headers = {
+      ...config.headers,
+      'Authorization': `Bearer ${getToken()}`
+    };
+    return config;
+  }
+});
+
+// Add response interceptor
+client.addResponseInterceptor({
+  onResponse: async (response) => {
+    // Log response status
+    console.log(`Response status: ${response.status}`);
+    return response;
+  },
+  onResponseError: async (error) => {
+    // Handle error
+    console.error('Response error:', error);
+    throw error;
+  }
 });
 ```
 
-### Middleware
+### Custom Response Types
 
 ```typescript
-client.middleware.add({
-    id: 'logger',
-    before: async (config) => {
-        console.log('Request:', config);
-        return config;
-    },
-    after: async (response) => {
-        console.log('Response:', response);
-        return response;
-    }
+// Get response as text
+const text = await client.get('/data.txt', {
+  responseType: 'text'
+});
+
+// Get response as blob
+const blob = await client.get('/image.png', {
+  responseType: 'blob'
+});
+
+// Get response as ArrayBuffer
+const buffer = await client.get('/data.bin', {
+  responseType: 'arraybuffer'
 });
 ```
 
-### Error Handling
+### Retry Mechanism
 
 ```typescript
-try {
-    const response = await client.get('/api/data');
-} catch (error) {
-    if (error instanceof HttpError) {
-        console.error('HTTP Error:', error.response.status);
-    } else if (error instanceof NetworkError) {
-        console.error('Network Error:', error.message);
-    } else if (error instanceof TimeoutError) {
-        console.error('Timeout Error:', error.message);
-    }
-}
+// Configure retries globally
+const client = new HttpClient({
+  retries: 3,
+  retryDelay: 1000 // 1 second between retries
+});
+
+// Configure retries for specific requests
+const data = await client.get('/api/data', {
+  retries: 5,
+  retryDelay: 2000 // 2 seconds between retries
+});
 ```
 
 ## API Reference
 
-### Client Configuration
+### HttpClient Configuration
 
 ```typescript
 interface ClientConfig {
-    baseURL?: string;
-    timeout?: number;
-    headers?: Record<string, string>;
-    cache?: CacheConfig | false;
-    retry?: RetryConfig | false;
-    middleware?: Middleware[];
-    interceptors?: Interceptor[];
+  baseURL?: string;
+  headers?: Record<string, string>;
+  timeout?: number;
+  retries?: number;
+  retryDelay?: number;
+  cache?: boolean | CacheConfig;
 }
 ```
 
-### Request Methods
+### Request Configuration
 
-- `get<T>(url: string, config?: RequestConfig): Promise<Response<T>>`
-- `post<T>(url: string, data?: any, config?: RequestConfig): Promise<Response<T>>`
-- `put<T>(url: string, data?: any, config?: RequestConfig): Promise<Response<T>>`
-- `patch<T>(url: string, data?: any, config?: RequestConfig): Promise<Response<T>>`
-- `delete<T>(url: string, config?: RequestConfig): Promise<Response<T>>`
-- `head<T>(url: string, config?: RequestConfig): Promise<Response<T>>`
-- `options<T>(url: string, config?: RequestConfig): Promise<Response<T>>`
+```typescript
+interface RequestConfig {
+  headers?: Record<string, string>;
+  params?: Record<string, string>;
+  timeout?: number;
+  signal?: AbortSignal;
+  retries?: number;
+  retryDelay?: number;
+  cache?: boolean | CacheConfig;
+  responseType?: 'json' | 'text' | 'blob' | 'arraybuffer';
+  onUploadProgress?: (event: ProgressEvent) => void;
+  onDownloadProgress?: (event: ProgressEvent) => void;
+}
+```
 
 ## License
 
-MIT
+MIT 
