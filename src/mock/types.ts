@@ -1,23 +1,25 @@
 export type MockMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS';
 
+export type MockPattern = string | RegExp;
+
 export interface MockConfig {
   method?: MockMethod;
-  url: string | RegExp;
-  query?: Record<string, string | RegExp>;
-  headers?: Record<string, string | RegExp>;
+  url: MockPattern;
+  query?: Record<string, MockPattern>;
+  headers?: Record<string, MockPattern>;
   body?: any | ((body: any) => boolean);
-  delay?: number | [number, number];
+  delay?: number;
   status?: number;
   statusText?: string;
-  response?: any | ((request: MockRequest) => Promise<any> | any);
+  response: any | ((request: MockRequest) => Promise<any> | any);
   times?: number;
 }
 
 export interface MockRequest {
   method: MockMethod;
   url: string;
-  query: Record<string, string>;
-  headers: Record<string, string>;
+  query?: Record<string, string>;
+  headers?: Record<string, string>;
   body?: any;
 }
 
@@ -35,3 +37,6 @@ export interface MockStats {
   unmatchedRequests: number;
   mocksWithRemainingTimes: Record<string, number>;
 }
+
+export type MockMatcher = (request: MockRequest) => boolean;
+export type MockResponseGenerator = (request: MockRequest) => Promise<MockResponse> | MockResponse;

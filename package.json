@@ -12,6 +12,8 @@
   "scripts": {
     "build": "tsup",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "prepublishOnly": "npm run build"
@@ -22,12 +24,14 @@
     "typescript",
     "fetch",
     "request",
-    "ajax"
+    "ajax",
+    "mock"
   ],
-  "author": "Ersin KOÇ",
+  "author": "",
   "license": "MIT",
   "devDependencies": {
-    "@types/jest": "^29.5.5",
+    "@jest/types": "^29.6.3",
+    "@types/jest": "^29.5.11",
     "@typescript-eslint/eslint-plugin": "^6.7.4",
     "@typescript-eslint/parser": "^6.7.4",
     "eslint": "^8.51.0",
@@ -35,7 +39,7 @@
     "prettier": "^3.0.3",
     "ts-jest": "^29.1.1",
     "tsup": "^7.2.0",
-    "typescript": "^5.2.2"
+    "typescript": "^5.3.3"
   },
   "repository": {
     "type": "git",

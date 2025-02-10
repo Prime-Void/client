@@ -1,4 +1,4 @@
-import { MockConfig, MockMethod, MockRequest, MockResponse, MockStats } from './types';
+import { MockConfig, MockMethod, MockPattern, MockRequest, MockResponse, MockStats } from './types';
 
 export class RequestMocker {
   private mocks: Map<string, MockConfig[]> = new Map();
@@ -36,13 +36,21 @@ export class RequestMocker {
 
     await this.simulateDelay(mock.delay);
 
-    const response = await this.generateResponse(mock, request);
+    let response: any;
+    if (typeof mock.response === 'function') {
+      response = await mock.response(request);
+    } else {
+      response = mock.response;
+    }
+
+    const isString = typeof response === 'string';
+    
     return {
       status: mock.status ?? 200,
       statusText: mock.statusText ?? 'OK',
       headers: {
-        'Content-Type': 'application/json',
-        ...typeof response === 'string' ? { 'Content-Type': 'text/plain' } : {},
+        'Content-Type': isString ? 'text/plain' : 'application/json',
+        ...mock.headers,
       },
       body: response,
     };
@@ -91,66 +99,56 @@ export class RequestMocker {
   }
 
   private findMatchingMock(mocks: MockConfig[], request: MockRequest): MockConfig | undefined {
-    return mocks.find(mock => {
-      // Match URL
-      if (mock.url instanceof RegExp) {
-        if (!mock.url.test(request.url)) return false;
-      } else if (mock.url !== request.url) {
-        return false;
-      }
+    return mocks.find(mock => this.matchesMock(mock, request));
+  }
 
-      // Match query parameters
-      if (mock.query) {
-        for (const [key, value] of Object.entries(mock.query)) {
-          const requestValue = request.query[key];
-          if (value instanceof RegExp) {
-            if (!value.test(requestValue)) return false;
-          } else if (value !== requestValue) {
-            return false;
-          }
-        }
-      }
+  private matchesMock(mock: MockConfig, request: MockRequest): boolean {
+    if (!this.matchPattern(mock.url, request.url)) {
+      return false;
+    }
 
-      // Match headers
-      if (mock.headers) {
-        for (const [key, value] of Object.entries(mock.headers)) {
-          const requestValue = request.headers[key.toLowerCase()];
-          if (value instanceof RegExp) {
-            if (!value.test(requestValue)) return false;
-          } else if (value !== requestValue) {
-            return false;
-          }
-        }
-      }
+    if (mock.query && !this.matchPatterns(mock.query, request.query || {})) {
+      return false;
+    }
 
-      // Match body
-      if (mock.body !== undefined) {
-        if (typeof mock.body === 'function') {
-          if (!mock.body(request.body)) return false;
-        } else if (JSON.stringify(mock.body) !== JSON.stringify(request.body)) {
+    if (mock.headers && !this.matchPatterns(mock.headers, request.headers || {})) {
+      return false;
+    }
+
+    if (mock.body) {
+      if (typeof mock.body === 'function') {
+        if (!mock.body(request.body)) {
           return false;
         }
+      } else if (JSON.stringify(mock.body) !== JSON.stringify(request.body)) {
+        return false;
       }
+    }
 
-      return true;
+    return true;
+  }
+
+  private matchPattern(pattern: MockPattern, value: string): boolean {
+    if (pattern instanceof RegExp) {
+      return pattern.test(value);
+    }
+    return pattern === value;
+  }
+
+  private matchPatterns(patterns: Record<string, MockPattern>, values: Record<string, string>): boolean {
+    return Object.entries(patterns).every(([key, pattern]) => {
+      const value = values[key];
+      if (value === undefined) {
+        return false;
+      }
+      return this.matchPattern(pattern, value);
     });
   }
 
-  private async simulateDelay(delay?: number | [number, number]): Promise<void> {
-    if (!delay) return;
-
-    const ms = Array.isArray(delay)
-      ? delay[0] + Math.random() * (delay[1] - delay[0])
-      : delay;
-
-    await new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  private async generateResponse(mock: MockConfig, request: MockRequest): Promise<any> {
-    if (typeof mock.response === 'function') {
-      return mock.response(request);
+  private async simulateDelay(delay?: number): Promise<void> {
+    if (delay) {
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
-    return mock.response;
   }
 }
 

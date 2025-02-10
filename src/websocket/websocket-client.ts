@@ -13,6 +13,14 @@ export class WebSocketClient {
     lastMessageTime: 0,
     lastHeartbeatTime: 0,
   };
+  private eventListeners: Map<string, Set<(data: any) => void>> = new Map();
+  private stats = {
+    messagesSent: 0,
+    messagesReceived: 0,
+    lastPingTime: 0,
+    lastPongTime: 0,
+    latency: 0,
+  };
 
   constructor(config: WebSocketConfig) {
     this.config = {
@@ -32,23 +40,63 @@ export class WebSocketClient {
     };
   }
 
-  connect(): void {
+  connect(): Promise<void> {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      return;
+      return Promise.resolve();
     }
 
-    try {
-      this.ws = new WebSocket(this.config.url, this.config.protocols);
-      this.setupEventListeners();
-    } catch (error) {
-      this.handleError(error);
-    }
+    return new Promise((resolve, reject) => {
+      try {
+        this.ws = new WebSocket(this.config.url, this.config.protocols);
+        this.setupEventListeners();
+
+        const onOpen = (event: Event) => {
+          this.ws!.removeEventListener('open', onOpen);
+          this.ws!.removeEventListener('error', onError);
+          this.state.isConnected = true;
+          this.state.isReconnecting = false;
+          this.state.reconnectAttempts = 0;
+          this.startHeartbeat();
+          this.flushMessageQueue();
+          this.config.onOpen(event);
+          resolve();
+        };
+
+        const onError = (event: Event) => {
+          this.ws!.removeEventListener('open', onOpen);
+          this.ws!.removeEventListener('error', onError);
+          this.state.isConnected = false;
+          if (this.config.autoReconnect && this.state.reconnectAttempts < this.config.maxReconnectAttempts) {
+            this.startReconnecting();
+          }
+          this.config.onError(event);
+          reject(new Error('Connection failed'));
+        };
+
+        this.ws.addEventListener('open', onOpen);
+        this.ws.addEventListener('error', onError);
+      } catch (error) {
+        reject(error);
+      }
+    });
   }
 
-  disconnect(): void {
+  close(): void {
     this.stopReconnecting();
     this.stopHeartbeat();
-    this.ws?.close();
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    this.state.isConnected = false;
+  }
+
+  isConnected(): boolean {
+    return this.state.isConnected;
+  }
+
+  getReconnectAttempts(): number {
+    return this.state.reconnectAttempts;
   }
 
   send<T>(message: WebSocketMessage<T>): void {
@@ -58,44 +106,57 @@ export class WebSocketClient {
     }
 
     try {
-      this.ws.send(JSON.stringify({
-        ...message,
-        timestamp: Date.now(),
-      }));
+      this.ws.send(JSON.stringify(message));
+      this.stats.messagesSent++;
     } catch (error) {
       this.handleError(error);
     }
   }
 
-  getState(): WebSocketState {
-    return { ...this.state };
+  on(event: string, callback: (data: any) => void): void {
+    if (!this.eventListeners.has(event)) {
+      this.eventListeners.set(event, new Set());
+    }
+    this.eventListeners.get(event)?.add(callback);
+  }
+
+  off(event: string, callback: (data: any) => void): void {
+    this.eventListeners.get(event)?.delete(callback);
   }
 
   private setupEventListeners(): void {
     if (!this.ws) return;
 
-    this.ws.onopen = (event: Event) => {
-      this.state.isConnected = true;
-      this.state.isReconnecting = false;
-      this.state.reconnectAttempts = 0;
-      this.startHeartbeat();
-      this.flushMessageQueue();
-      this.config.onOpen(event);
-    };
-
     this.ws.onmessage = (event: MessageEvent) => {
       this.state.lastMessageTime = Date.now();
-      this.config.onMessage(event);
+      this.stats.messagesReceived++;
+
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'heartbeat') {
+          this.handleHeartbeat(message);
+        } else {
+          this.config.onMessage(message);
+          const listeners = this.eventListeners.get('message');
+          if (listeners) {
+            listeners.forEach(callback => callback(message));
+          }
+          const typeListeners = this.eventListeners.get(message.type);
+          if (typeListeners) {
+            typeListeners.forEach(callback => callback(message));
+          }
+        }
+      } catch (error) {
+        this.handleError(error);
+      }
     };
 
     this.ws.onclose = (event: CloseEvent) => {
       this.state.isConnected = false;
-      this.stopHeartbeat();
-      this.config.onClose(event);
-
-      if (this.config.autoReconnect && !this.state.isReconnecting) {
-        this.reconnect();
+      if (this.config.autoReconnect && this.state.reconnectAttempts < this.config.maxReconnectAttempts) {
+        this.startReconnecting();
       }
+      this.config.onClose(event);
     };
 
     this.ws.onerror = (event: Event) => {
@@ -103,12 +164,42 @@ export class WebSocketClient {
     };
   }
 
+  private startReconnecting(): void {
+    if (this.state.isReconnecting) return;
+
+    this.state.isReconnecting = true;
+    this.state.reconnectAttempts++;
+    this.config.onReconnect(this.state.reconnectAttempts);
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+
+    this.reconnectTimer = setTimeout(() => {
+      this.connect().catch(() => {
+        if (this.state.reconnectAttempts < this.config.maxReconnectAttempts) {
+          this.startReconnecting();
+        }
+      });
+    }, this.config.reconnectInterval);
+  }
+
+  private stopReconnecting(): void {
+    this.state.isReconnecting = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
   private startHeartbeat(): void {
-    this.stopHeartbeat();
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+    }
+
     this.heartbeatTimer = setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
-        this.send({ type: 'heartbeat', data: null });
-        this.state.lastHeartbeatTime = Date.now();
+        this.send({ type: 'heartbeat', timestamp: Date.now() });
         this.config.onHeartbeat();
       }
     }, this.config.heartbeatInterval);
@@ -121,44 +212,34 @@ export class WebSocketClient {
     }
   }
 
-  private reconnect(): void {
-    if (
-      this.state.reconnectAttempts >= this.config.maxReconnectAttempts ||
-      this.state.isReconnecting
-    ) {
-      return;
+  private handleHeartbeat(message: WebSocketMessage<any>): void {
+    const now = Date.now();
+    if (message.type === 'heartbeat') {
+      this.stats.lastPongTime = now;
+      this.stats.latency = now - (message.timestamp || 0);
+    } else {
+      this.stats.lastPingTime = now;
     }
-
-    this.state.isReconnecting = true;
-    this.state.reconnectAttempts++;
-    this.config.onReconnect(this.state.reconnectAttempts);
-
-    this.reconnectTimer = setTimeout(() => {
-      this.connect();
-    }, this.config.reconnectInterval);
+    this.state.lastHeartbeatTime = now;
   }
 
-  private stopReconnecting(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
+  private handleError(error: unknown): void {
+    this.state.isConnected = false;
+    if (this.config.autoReconnect && !this.state.isReconnecting) {
+      this.startReconnecting();
     }
-    this.state.isReconnecting = false;
+    this.config.onError(error instanceof Event ? error : new ErrorEvent('error', {
+      error,
+      message: error instanceof Error ? error.message : String(error),
+    }));
   }
 
   private flushMessageQueue(): void {
-    while (this.messageQueue.length > 0) {
+    while (this.messageQueue.length > 0 && this.ws?.readyState === WebSocket.OPEN) {
       const message = this.messageQueue.shift();
       if (message) {
         this.send(message);
       }
     }
-  }
-
-  private handleError(error: unknown): void {
-    this.config.onError(error instanceof Event ? error : new ErrorEvent('error', {
-      error,
-      message: error instanceof Error ? error.message : String(error),
-    }));
   }
 }

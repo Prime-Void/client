@@ -2,7 +2,6 @@ export interface GraphQLConfig {
   endpoint: string;
   headers?: Record<string, string>;
   includeExtensions?: boolean;
-  defaultOperationName?: string;
   onError?: (error: GraphQLError) => void;
 }
 
@@ -11,10 +10,9 @@ export interface GraphQLError {
   locations?: { line: number; column: number }[];
   path?: (string | number)[];
   extensions?: Record<string, unknown>;
-  originalError?: Error;
 }
 
-export interface GraphQLResponse<T = any> {
+export interface GraphQLResponse<T = unknown> {
   data?: T;
   errors?: GraphQLError[];
   extensions?: Record<string, unknown>;
@@ -22,8 +20,27 @@ export interface GraphQLResponse<T = any> {
 
 export interface GraphQLRequestOptions {
   variables?: Record<string, unknown>;
-  operationName?: string;
   headers?: Record<string, string>;
-  context?: Record<string, any>;
-  extensions?: Record<string, any>;
+}
+
+export interface GraphQLSubscriptionMessage<T = unknown> {
+  type: 'data' | 'error' | 'complete';
+  id?: string;
+  payload?: {
+    data?: T;
+    errors?: GraphQLError[];
+    message?: string;
+  };
+}
+
+export interface GraphQLSubscriptionObserver<T> {
+  next: (data: T) => void;
+  error: (error: Error) => void;
+  complete: () => void;
+}
+
+export interface GraphQLSubscription<T> {
+  subscribe: (observer: GraphQLSubscriptionObserver<T>) => {
+    unsubscribe: () => void;
+  };
 }

@@ -15,26 +15,24 @@ export interface WebSocketConfig {
   maxReconnectAttempts?: number;
   autoReconnect?: boolean;
   onOpen?: (event: Event) => void;
-  onMessage?: (event: MessageEvent) => void;
+  onMessage?: (message: WebSocketMessage<any>) => void;
   onClose?: (event: CloseEvent) => void;
-  onError?: (event: Event) => void;
+  onError?: (error: Event | ErrorEvent) => void;
   onReconnect?: (attempt: number) => void;
   onHeartbeat?: () => void;
 }
 
 export interface WebSocketMessage<T = any> {
   type: string;
-  data: T;
+  data?: T;
   id?: string;
   timestamp?: number;
 }
 
 export interface WebSocketStats {
-  state: WebSocketState;
-  reconnectAttempts: number;
   messagesSent: number;
   messagesReceived: number;
-  lastPingTime?: number;
-  lastPongTime?: number;
-  latency?: number;
+  lastPingTime: number;
+  lastPongTime: number;
+  latency: number;
 }

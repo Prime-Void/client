@@ -7,7 +7,7 @@ export interface SSEConfig {
   autoReconnect?: boolean;
   onOpen?: (event: Event) => void;
   onMessage?: (event: MessageEvent) => void;
-  onError?: (event: Event) => void;
+  onError?: (error: Event | ErrorEvent) => void;
   onReconnect?: (attempt: number) => void;
 }
 
