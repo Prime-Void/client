@@ -1,5 +1,8 @@
 import { CacheConfig } from './cache';
+import { Logger } from './logger/types';
 import { ProgressConfig } from './progress';
+import { QueueConfig } from './queue/types';
+import { RateLimitConfig } from './rate-limit/types';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
@@ -17,6 +20,8 @@ export interface RequestConfig extends ProgressConfig {
   data?: unknown;
   cache?: boolean | CacheConfig;
   responseType?: 'json' | 'text' | 'blob' | 'arraybuffer';
+  queue?: boolean | QueueConfig;
+  rateLimit?: boolean | RateLimitConfig;
 }
 
 export interface ClientConfig {
@@ -26,6 +31,9 @@ export interface ClientConfig {
   retries?: number;
   retryDelay?: number;
   cache?: boolean | CacheConfig;
+  queue?: boolean | QueueConfig;
+  rateLimit?: boolean | RateLimitConfig;
+  logger?: Logger;
 }
 
 export interface RequestInterceptor {
@@ -62,4 +70,14 @@ export interface RetryConfig {
 export interface RequestOptions {
   cache?: boolean | CacheConfig;
   signal?: AbortSignal;
+}
+
+export class RateLimitError extends Error {
+  constructor(
+    public readonly reset: number,
+    public readonly limit: number
+  ) {
+    super(`Rate limit exceeded. Resets at ${new Date(reset).toISOString()}`);
+    this.name = 'RateLimitError';
+  }
 }
