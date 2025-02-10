@@ -19,7 +19,14 @@ export class GzipCompressor implements Compressor {
       output.push(value);
     }
 
-    return new Uint8Array(output.reduce((acc, curr) => [...acc, ...curr], []));
+    const totalLength = output.reduce((acc, curr) => acc + curr.length, 0);
+    const result = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of output) {
+      result.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return result;
   }
 
   async decompress(data: Uint8Array): Promise<string> {
@@ -36,7 +43,13 @@ export class GzipCompressor implements Compressor {
       output.push(value);
     }
 
-    const decompressed = new Uint8Array(output.reduce((acc, curr) => [...acc, ...curr], []));
-    return new TextDecoder().decode(decompressed);
+    const totalLength = output.reduce((acc, curr) => acc + curr.length, 0);
+    const result = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of output) {
+      result.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return new TextDecoder().decode(result);
   }
 }

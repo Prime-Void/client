@@ -1,148 +1,179 @@
 import { GraphQLConfig, GraphQLRequestOptions, GraphQLResponse, GraphQLError } from './types';
+import { HttpClient } from '../client';
 
 export class GraphQLClient {
   private config: GraphQLConfig;
   private onError?: (error: GraphQLError) => void;
+  private eventListeners: Map<string, Set<EventListener>> = new Map();
+  private ws: WebSocket | null = null;
 
-  constructor(config: GraphQLConfig) {
-    this.config = config;
+  constructor(config: GraphQLConfig, private httpClient: HttpClient) {
+    this.config = {
+      endpoint: config.endpoint,
+      headers: config.headers || {},
+      onError: config.onError,
+    };
     this.onError = config.onError;
+  }
+
+  on(event: string, callback: EventListener): void {
+    if (!this.eventListeners.has(event)) {
+      this.eventListeners.set(event, new Set());
+    }
+    this.eventListeners.get(event)?.add(callback);
+  }
+
+  off(event: string, callback: EventListener): void {
+    this.eventListeners.get(event)?.delete(callback);
+  }
+
+  emit(event: string, data: any): void {
+    this.eventListeners.get(event)?.forEach(callback => {
+      try {
+        callback(new MessageEvent(event, { data }));
+      } catch (error) {
+        this.handleError(error);
+      }
+    });
   }
 
   async query<T = any>(
     query: string,
     options: GraphQLRequestOptions = {}
-  ): Promise<GraphQLResponse<T>> {
-    return this.request<T>('query', query, options);
+  ): Promise<T> {
+    const response = await this.request<T>('query', query, options);
+    if (response.errors?.length) {
+      const error = new Error(`GraphQL Error: ${response.errors[0].message}`);
+      this.handleError(error);
+      throw error;
+    }
+    return response.data!;
   }
 
   async mutation<T = any>(
     mutation: string,
     options: GraphQLRequestOptions = {}
-  ): Promise<GraphQLResponse<T>> {
-    return this.request<T>('mutation', mutation, options);
-  }
-
-  async subscribe<T = any>(
-    subscription: string,
-    options: GraphQLRequestOptions = {}
-  ): Promise<AsyncIterator<GraphQLResponse<T>>> {
-    const headers = {
-      ...this.config.headers,
-      ...options.headers,
-      'Content-Type': 'application/json',
-    };
-
-    const variables = options.variables || {};
-    const operationName = options.operationName || this.config.defaultOperationName;
-
-    const url = new URL(this.config.endpoint);
-    url.searchParams.set('query', subscription);
-    url.searchParams.set('variables', JSON.stringify(variables));
-    if (operationName) {
-      url.searchParams.set('operationName', operationName);
-    }
-
-    return this.createSubscriptionIterator<T>(url.toString(), headers);
-  }
-
-  private async request<T>(
-    operationType: 'query' | 'mutation',
-    document: string,
-    options: GraphQLRequestOptions
-  ): Promise<GraphQLResponse<T>> {
-    const headers = {
-      ...this.config.headers,
-      ...options.headers,
-      'Content-Type': 'application/json',
-    };
-
-    const body = {
-      query: document,
-      variables: options.variables,
-      operationName: options.operationName || this.config.defaultOperationName,
-    };
-
-    try {
-      const response = await fetch(this.config.endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result: GraphQLResponse<T> = await response.json();
-
-      if (result.errors?.length) {
-        const error = new Error(result.errors[0].message);
-        this.handleError(error);
-        throw error;
-      }
-
-      return result;
-    } catch (error) {
+  ): Promise<T> {
+    const response = await this.request<T>('mutation', mutation, options);
+    if (response.errors?.length) {
+      const error = new Error(`GraphQL Error: ${response.errors[0].message}`);
       this.handleError(error);
       throw error;
     }
+    return response.data!;
   }
 
-  private createSubscriptionIterator<T>(
-    url: string,
-    headers: Record<string, string>
-  ): AsyncIterator<GraphQLResponse<T>> & AsyncIterable<GraphQLResponse<T>> {
-    const eventSource = new EventSource(url);
+  async batch<T = any>(queries: { query: string; variables?: Record<string, unknown> }[]): Promise<T[]> {
+    const response = await this.httpClient.post<{ json(): Promise<GraphQLResponse<T>[]> }>(
+      this.config.endpoint,
+      queries.map(q => ({
+        query: q.query,
+        variables: q.variables,
+      })),
+      {
+        headers: {
+          ...this.config.headers,
+          'Content-Type': 'application/json',
+        }
+      }
+    );
 
-    // Add headers to the connection
-    Object.entries(headers).forEach(([key, value]) => {
-      eventSource.addEventListener('open', () => {
-        (eventSource as any).setRequestHeader?.(key, value);
-      });
-    });
+    const results = await response.json();
+    const error = results.find(r => r.errors?.length);
+    if (error) {
+      const err = new Error(`GraphQL Error: ${error.errors![0].message}`);
+      this.handleError(err);
+      throw err;
+    }
 
-    const iterator: AsyncIterator<GraphQLResponse<T>> & AsyncIterable<GraphQLResponse<T>> = {
-      async next(): Promise<IteratorResult<GraphQLResponse<T>>> {
-        return new Promise((resolve, reject) => {
-          eventSource.onmessage = (event) => {
-            try {
-              const data = JSON.parse(event.data);
-              resolve({ value: data, done: false });
-            } catch (error) {
-              reject(new Error('Failed to parse subscription data: ' + error));
+    return results.map(r => r.data!);
+  }
+
+  subscription<T = any>(
+    subscription: string,
+    variables: Record<string, unknown> = {}
+  ): { subscribe: (observer: { next: (data: T) => void; error: (error: Error) => void; complete: () => void }) => { unsubscribe: () => void } } {
+    const subscriptionId = Math.random().toString(36).substring(2);
+    const wsUrl = this.config.endpoint.replace(/^http/, 'ws');
+    
+    return {
+      subscribe: (observer) => {
+        this.ws = new WebSocket(wsUrl);
+
+        this.ws.onopen = () => {
+          this.ws!.send(JSON.stringify({
+            type: 'start',
+            id: subscriptionId,
+            payload: {
+              query: subscription,
+              variables,
+            },
+          }));
+        };
+
+        this.ws.onmessage = (event: MessageEvent) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'data') {
+              observer.next(data.payload.data);
+            } else if (data.type === 'complete') {
+              observer.complete();
+            } else if (data.type === 'error') {
+              observer.error(new Error(data.payload.message));
             }
-          };
+          } catch (error) {
+            observer.error(error instanceof Error ? error : new Error('Unknown error'));
+          }
+        };
 
-          eventSource.onerror = (error: Event) => {
-            reject(new Error('Subscription error: ' + (error as ErrorEvent).message));
-          };
-        });
-      },
+        this.ws.onerror = (event: Event) => {
+          observer.error(event instanceof ErrorEvent ? event.error : new Error('WebSocket error'));
+        };
 
-      async return(): Promise<IteratorResult<GraphQLResponse<T>>> {
-        eventSource.close();
-        return { value: undefined, done: true };
-      },
-
-      async throw(error: unknown): Promise<IteratorResult<GraphQLResponse<T>>> {
-        eventSource.close();
-        throw error instanceof Error ? error : new Error(String(error));
-      },
-
-      [Symbol.asyncIterator](): AsyncIterator<GraphQLResponse<T>> {
-        return this;
+        return {
+          unsubscribe: () => {
+            if (this.ws) {
+              this.ws.send(JSON.stringify({
+                type: 'stop',
+                id: subscriptionId,
+              }));
+              this.ws.close();
+              this.ws = null;
+            }
+          },
+        };
       },
     };
+  }
 
-    return iterator;
+  private async request<T>(
+    type: 'query' | 'mutation',
+    document: string,
+    options: GraphQLRequestOptions
+  ): Promise<GraphQLResponse<T>> {
+    const response = await this.httpClient.post<{ json(): Promise<GraphQLResponse<T>> }>(
+      this.config.endpoint,
+      {
+        query: document,
+        variables: options.variables,
+      },
+      {
+        headers: {
+          ...this.config.headers,
+          'Content-Type': 'application/json',
+        }
+      }
+    );
+
+    return response.json();
   }
 
   private handleError(error: unknown): void {
-    const graphqlError: GraphQLError = error instanceof Error 
-      ? { message: error.message, originalError: error }
-      : { message: String(error) };
-    
-    this.onError?.(graphqlError);
+    if (this.onError) {
+      this.onError({
+        message: error instanceof Error ? error.message : String(error),
+        extensions: {},
+      });
+    }
   }
 }
