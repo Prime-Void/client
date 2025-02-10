@@ -1,190 +1,154 @@
-import { SSEConfig, SSEMessage, SSEStats } from './types';
+import { SSEConfig, SSEMessage, SSEState } from './types';
 
 export class SSEClient {
   private eventSource: EventSource | null = null;
-  private reconnectAttempts = 0;
-  private messagesReceived = 0;
-  private lastMessageTime?: number;
-  private startTime = Date.now();
-  private connectionStartTime?: number;
-  private heartbeatTimeout?: NodeJS.Timeout;
-  private messageHandlers = new Map<string, Set<(message: SSEMessage) => void>>();
-  private stateHandlers = new Set<(state: 'connecting' | 'open' | 'closed') => void>();
+  private config: Required<SSEConfig>;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private state: SSEState = {
+    isConnected: false,
+    isReconnecting: false,
+    reconnectAttempts: 0,
+    lastEventId: null,
+    lastEventTime: 0,
+  };
 
-  constructor(
-    private readonly url: string,
-    private readonly config: SSEConfig = {}
-  ) {
+  constructor(config: SSEConfig) {
     this.config = {
-      withCredentials: false,
-      reconnectInterval: 1000,
-      maxRetries: 5,
-      heartbeatTimeout: 60000,
-      ...config,
+      url: config.url,
+      headers: config.headers || {},
+      withCredentials: config.withCredentials || false,
+      reconnectInterval: config.reconnectInterval || 5000,
+      maxReconnectAttempts: config.maxReconnectAttempts || 5,
+      autoReconnect: config.autoReconnect ?? true,
+      onOpen: config.onOpen || (() => {}),
+      onMessage: config.onMessage || (() => {}),
+      onError: config.onError || (() => {}),
+      onReconnect: config.onReconnect || (() => {}),
     };
   }
 
-  connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        const url = new URL(this.url);
-        if (this.config.lastEventId) {
-          url.searchParams.set('lastEventId', this.config.lastEventId);
-        }
+  connect(): void {
+    if (this.eventSource) {
+      return;
+    }
 
-        this.eventSource = new EventSource(url.toString(), {
-          withCredentials: this.config.withCredentials,
-        });
+    try {
+      const url = new URL(this.config.url);
+      
+      // Add headers as query parameters since EventSource doesn't support headers
+      Object.entries(this.config.headers).forEach(([key, value]) => {
+        url.searchParams.append(key, value);
+      });
 
-        this.eventSource.onopen = () => {
-          this.reconnectAttempts = 0;
-          this.connectionStartTime = Date.now();
-          this.setupHeartbeat();
-          this.notifyStateChange('open');
-          resolve();
-        };
+      if (this.state.lastEventId) {
+        url.searchParams.append('lastEventId', this.state.lastEventId);
+      }
 
-        this.eventSource.onerror = (error) => {
-          this.handleError(error);
-          reject(error);
-        };
+      this.eventSource = new EventSource(url.toString(), {
+        withCredentials: this.config.withCredentials,
+      });
 
-        this.eventSource.onmessage = (event) => {
-          this.handleMessage(event);
-        };
+      this.setupEventListeners();
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
 
-        // Setup event listeners for custom event types
-        this.messageHandlers.forEach((_, eventType) => {
-          this.eventSource!.addEventListener(eventType, (event: MessageEvent) => {
-            this.handleMessage(event, eventType);
-          });
-        });
+  disconnect(): void {
+    this.stopReconnecting();
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+    }
+    this.state.isConnected = false;
+  }
 
-      } catch (error) {
-        reject(error);
+  getState(): SSEState {
+    return { ...this.state };
+  }
+
+  private setupEventListeners(): void {
+    if (!this.eventSource) return;
+
+    this.eventSource.onopen = (event: Event) => {
+      this.state.isConnected = true;
+      this.state.isReconnecting = false;
+      this.state.reconnectAttempts = 0;
+      this.config.onOpen(event);
+    };
+
+    this.eventSource.onmessage = (event: MessageEvent) => {
+      this.handleMessage(event);
+    };
+
+    this.eventSource.onerror = (event: Event) => {
+      this.handleError(event);
+    };
+
+    // Listen for specific event types
+    this.eventSource.addEventListener('error', (event: Event) => {
+      if ((event.target as EventSource).readyState === EventSource.CLOSED) {
+        this.handleClose();
       }
     });
   }
 
-  on(eventType: string, handler: (message: SSEMessage) => void): () => void {
-    if (!this.messageHandlers.has(eventType)) {
-      this.messageHandlers.set(eventType, new Set());
-      
-      if (this.eventSource) {
-        this.eventSource.addEventListener(eventType, (event: MessageEvent) => {
-          this.handleMessage(event, eventType);
-        });
-      }
-    }
-
-    this.messageHandlers.get(eventType)!.add(handler);
-    return () => this.messageHandlers.get(eventType)?.delete(handler);
-  }
-
-  onStateChange(handler: (state: 'connecting' | 'open' | 'closed') => void): () => void {
-    this.stateHandlers.add(handler);
-    return () => this.stateHandlers.delete(handler);
-  }
-
-  close(): void {
-    this.cleanup();
-    if (this.eventSource) {
-      this.eventSource.close();
-      this.eventSource = null;
-      this.notifyStateChange('closed');
-    }
-  }
-
-  getStats(): SSEStats {
-    return {
-      connectionState: this.eventSource ? 
-        this.eventSource.readyState === EventSource.CONNECTING ? 'connecting' :
-        this.eventSource.readyState === EventSource.OPEN ? 'open' : 'closed'
-        : 'closed',
-      reconnectAttempts: this.reconnectAttempts,
-      messagesReceived: this.messagesReceived,
-      lastMessageTime: this.lastMessageTime,
-      connectionUptime: this.connectionStartTime ? 
-        Date.now() - this.connectionStartTime : 0,
-      totalUptime: Date.now() - this.startTime,
-    };
-  }
-
-  private handleMessage(event: MessageEvent, eventType = 'message'): void {
-    this.resetHeartbeat();
-    this.messagesReceived++;
-    this.lastMessageTime = Date.now();
-
+  private handleMessage(event: MessageEvent): void {
     try {
       const message: SSEMessage = {
-        id: event.lastEventId,
-        type: eventType,
-        data: event.data ? JSON.parse(event.data) : null,
+        id: event.lastEventId || undefined,
+        type: event.type !== 'message' ? event.type : undefined,
+        data: JSON.parse(event.data),
         timestamp: Date.now(),
       };
 
-      const handlers = this.messageHandlers.get(eventType);
-      if (handlers) {
-        handlers.forEach(handler => handler(message));
-      }
+      this.state.lastEventId = message.id || this.state.lastEventId;
+      this.state.lastEventTime = message.timestamp;
+
+      this.config.onMessage(event);
     } catch (error) {
-      console.error('Error parsing SSE message:', error);
+      this.handleError(error);
     }
   }
 
-  private handleError(error: Event): void {
-    if (!this.eventSource) return;
-
-    if (this.eventSource.readyState === EventSource.CLOSED) {
-      this.notifyStateChange('closed');
-      
-      if (
-        this.config.maxRetries === undefined ||
-        this.reconnectAttempts < this.config.maxRetries
-      ) {
-        this.reconnectAttempts++;
-        const delay = this.config.reconnectInterval! * Math.pow(2, this.reconnectAttempts - 1);
-        
-        setTimeout(() => {
-          this.connect().catch(() => {
-            // Error handling is done in connect()
-          });
-        }, delay);
-      }
+  private handleClose(): void {
+    this.state.isConnected = false;
+    
+    if (this.config.autoReconnect && !this.state.isReconnecting) {
+      this.reconnect();
     }
   }
 
-  private setupHeartbeat(): void {
-    if (!this.config.heartbeatTimeout) return;
-
-    this.heartbeatTimeout = setInterval(() => {
-      if (
-        this.lastMessageTime && 
-        Date.now() - this.lastMessageTime > this.config.heartbeatTimeout!
-      ) {
-        this.close();
-        this.connect().catch(() => {
-          // Error handling is done in connect()
-        });
-      }
-    }, this.config.heartbeatTimeout);
-  }
-
-  private resetHeartbeat(): void {
-    if (this.heartbeatTimeout) {
-      clearTimeout(this.heartbeatTimeout);
-      this.setupHeartbeat();
+  private reconnect(): void {
+    if (
+      this.state.reconnectAttempts >= this.config.maxReconnectAttempts ||
+      this.state.isReconnecting
+    ) {
+      return;
     }
+
+    this.state.isReconnecting = true;
+    this.state.reconnectAttempts++;
+    this.config.onReconnect(this.state.reconnectAttempts);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.disconnect();
+      this.connect();
+    }, this.config.reconnectInterval);
   }
 
-  private cleanup(): void {
-    if (this.heartbeatTimeout) {
-      clearTimeout(this.heartbeatTimeout);
-      this.heartbeatTimeout = undefined;
+  private stopReconnecting(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
+    this.state.isReconnecting = false;
   }
 
-  private notifyStateChange(state: 'connecting' | 'open' | 'closed'): void {
-    this.stateHandlers.forEach(handler => handler(state));
+  private handleError(error: unknown): void {
+    this.config.onError(error instanceof Event ? error : new ErrorEvent('error', {
+      error,
+      message: error instanceof Error ? error.message : String(error),
+    }));
   }
 }

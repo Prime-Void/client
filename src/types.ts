@@ -4,6 +4,7 @@ import { CircuitBreakerConfig } from './circuit-breaker';
 import { CompressionConfig } from './compression';
 import { CryptoConfig } from './crypto';
 import { DedupConfig } from './dedup';
+import { GraphQLConfig } from './graphql';
 import { Http2Config } from './http2';
 import { Logger } from './logger/types';
 import { ProgressConfig } from './progress';
@@ -11,6 +12,7 @@ import { QueueConfig } from './queue/types';
 import { RateLimitConfig } from './rate-limit/types';
 import { SSEConfig } from './sse';
 import { ThrottleConfig } from './throttle';
+import { UploadConfig, DownloadConfig } from './upload';
 import { WebSocketConfig } from './websocket';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
@@ -40,6 +42,9 @@ export interface RequestConfig extends ProgressConfig {
   http2?: boolean | Http2Config;
   websocket?: boolean | WebSocketConfig;
   sse?: boolean | SSEConfig;
+  graphql?: boolean | GraphQLConfig;
+  upload?: boolean | UploadConfig;
+  download?: boolean | DownloadConfig;
 }
 
 export interface ClientConfig {
@@ -60,6 +65,9 @@ export interface ClientConfig {
   http2?: boolean | Http2Config;
   websocket?: boolean | WebSocketConfig;
   sse?: boolean | SSEConfig;
+  graphql?: boolean | GraphQLConfig;
+  upload?: boolean | UploadConfig;
+  download?: boolean | DownloadConfig;
   logger?: Logger;
 }
 

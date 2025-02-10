@@ -1,24 +1,28 @@
 export interface SSEConfig {
+  url: string;
+  headers?: Record<string, string>;
   withCredentials?: boolean;
   reconnectInterval?: number;
-  maxRetries?: number;
-  lastEventId?: string;
-  heartbeatTimeout?: number;
+  maxReconnectAttempts?: number;
+  autoReconnect?: boolean;
+  onOpen?: (event: Event) => void;
+  onMessage?: (event: MessageEvent) => void;
+  onError?: (event: Event) => void;
+  onReconnect?: (attempt: number) => void;
 }
 
-export interface SSEMessage {
+export interface SSEState {
+  isConnected: boolean;
+  isReconnecting: boolean;
+  reconnectAttempts: number;
+  lastEventId: string | null;
+  lastEventTime: number;
+}
+
+export interface SSEMessage<T = any> {
   id?: string;
-  type: string;
-  data: any;
+  type?: string;
+  data: T;
   retry?: number;
   timestamp: number;
-}
-
-export interface SSEStats {
-  connectionState: 'connecting' | 'open' | 'closed';
-  reconnectAttempts: number;
-  messagesReceived: number;
-  lastMessageTime?: number;
-  connectionUptime: number;
-  totalUptime: number;
 }
