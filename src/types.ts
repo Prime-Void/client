@@ -2,10 +2,13 @@ import { BatchConfig } from './batch';
 import { CacheConfig } from './cache';
 import { CircuitBreakerConfig } from './circuit-breaker';
 import { CompressionConfig } from './compression';
+import { CryptoConfig } from './crypto';
+import { DedupConfig } from './dedup';
 import { Logger } from './logger/types';
 import { ProgressConfig } from './progress';
 import { QueueConfig } from './queue/types';
 import { RateLimitConfig } from './rate-limit/types';
+import { ThrottleConfig } from './throttle';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
@@ -28,6 +31,9 @@ export interface RequestConfig extends ProgressConfig {
   batch?: boolean | BatchConfig;
   compression?: boolean | CompressionConfig;
   circuitBreaker?: boolean | CircuitBreakerConfig;
+  throttle?: boolean | ThrottleConfig;
+  dedup?: boolean | DedupConfig;
+  crypto?: boolean | CryptoConfig;
 }
 
 export interface ClientConfig {
@@ -42,6 +48,9 @@ export interface ClientConfig {
   batch?: boolean | BatchConfig;
   compression?: boolean | CompressionConfig;
   circuitBreaker?: boolean | CircuitBreakerConfig;
+  throttle?: boolean | ThrottleConfig;
+  dedup?: boolean | DedupConfig;
+  crypto?: boolean | CryptoConfig;
   logger?: Logger;
 }
 
