@@ -26,6 +26,7 @@ export class RequestMocker {
     }
 
     this.matchedRequests++;
+    mock.times = mock.times ?? Infinity;
     if (mock.times !== Infinity) {
       mock.times--;
       if (mock.times <= 0) {
@@ -59,9 +60,10 @@ export class RequestMocker {
 
     this.mocks.forEach((methodMocks, method) => {
       methodMocks.forEach((mock, index) => {
-        if (mock.times > 0) {
+        const times = mock.times ?? Infinity;
+        if (times > 0) {
           activeMocks++;
-          mocksWithRemainingTimes[`${method}-${index}`] = mock.times;
+          mocksWithRemainingTimes[`${method}-${index}`] = times;
         }
       });
     });

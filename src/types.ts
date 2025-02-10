@@ -69,11 +69,11 @@ export interface ClientConfig {
   upload?: boolean | UploadConfig;
   download?: boolean | DownloadConfig;
   logger?: Logger;
+  enableMocking?: boolean;
 }
 
 export interface RequestInterceptor {
-  onRequest: (config: RequestConfig) => Promise<RequestConfig> | RequestConfig;
-  onRequestError?: (error: unknown) => Promise<unknown>;
+  (config: RequestConfig): Promise<Response | null> | Response | null;
 }
 
 export interface ResponseInterceptor {

@@ -28,6 +28,47 @@ export class HttpClient {
     if (config.cache) {
       this.cache = new MemoryStore();
     }
+
+    // Add mock interceptor if mocking is enabled
+    if (config.enableMocking) {
+      this.addRequestInterceptor(async (config) => {
+        try {
+          const { mocker } = await import('./mock');
+          const mockResponse = await mocker.mockRequest({
+            method: config.method as any,
+            url: this.resolveUrl(config.url || ''),
+            query: this.parseQueryParams(config.params),
+            headers: { ...this.defaultHeaders, ...config.headers },
+            body: config.data,
+          });
+
+          return new Response(
+            typeof mockResponse.body === 'string' 
+              ? mockResponse.body 
+              : JSON.stringify(mockResponse.body),
+            {
+              status: mockResponse.status,
+              statusText: mockResponse.statusText,
+              headers: new Headers(mockResponse.headers),
+            }
+          );
+        } catch (error: any) {
+          // If no mock is found, continue with the real request
+          if (error?.message?.includes('No matching mock found')) {
+            return null;
+          }
+          throw error;
+        }
+      });
+    }
+  }
+
+  private parseQueryParams(params?: Record<string, string>): Record<string, string> {
+    if (!params) return {};
+    return Object.entries(params).reduce((acc, [key, value]) => {
+      acc[key] = String(value);
+      return acc;
+    }, {} as Record<string, string>);
   }
 
   /**
@@ -218,6 +259,73 @@ export class HttpClient {
     }
   }
 
+  private async executeRequest(config: RequestConfig): Promise<Response> {
+    let currentConfig = { ...config };
+
+    // Apply request interceptors
+    for (const interceptor of this.requestInterceptors) {
+      try {
+        const result = await interceptor(currentConfig);
+        if (result instanceof Response) {
+          throw new InterceptorResponse(result);
+        }
+        if (result === null) {
+          continue;
+        }
+        currentConfig = result as RequestConfig;
+      } catch (error) {
+        if (error instanceof InterceptorResponse) {
+          throw error;
+        }
+        throw error;
+      }
+    }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), currentConfig.timeout ?? this.timeout);
+    const signal = currentConfig.signal ?? controller.signal;
+
+    // Create request
+    const requestInit: RequestInit = {
+      method: currentConfig.method,
+      headers: currentConfig.headers,
+      signal,
+    };
+
+    // Handle request body and upload progress
+    if (currentConfig.data) {
+      if (currentConfig.onUploadProgress && typeof currentConfig.data === 'object') {
+        const body = JSON.stringify(currentConfig.data);
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(body));
+            controller.close();
+          },
+        });
+
+        const tracker = new ProgressTracker(currentConfig.onUploadProgress);
+        requestInit.body = tracker.wrapReader(stream, body.length);
+      } else {
+        requestInit.body = JSON.stringify(currentConfig.data);
+      }
+    }
+
+    let response = await fetch(currentConfig.url!, requestInit);
+
+    clearTimeout(timeoutId);
+
+    // Handle download progress
+    if (currentConfig.onDownloadProgress) {
+      const contentLength = Number(response.headers.get('content-length') ?? 0);
+      const tracker = new ProgressTracker(currentConfig.onDownloadProgress);
+      response = new Response(
+        tracker.wrapReader(response.body!, contentLength),
+        response
+      );
+    }
+
+    return response;
+  }
+
   private shouldUseCache(config: RequestConfig): boolean {
     return (
       !!this.cache &&
@@ -276,10 +384,17 @@ export class HttpClient {
     let currentConfig = { ...config };
     for (const interceptor of this.requestInterceptors) {
       try {
-        currentConfig = await interceptor.onRequest(currentConfig);
+        const result = await interceptor(currentConfig);
+        if (result instanceof Response) {
+          throw new InterceptorResponse(result);
+        }
+        if (result === null) {
+          continue;
+        }
+        currentConfig = result as RequestConfig;
       } catch (error) {
-        if (interceptor.onRequestError) {
-          await interceptor.onRequestError(error);
+        if (error instanceof InterceptorResponse) {
+          throw error;
         }
         throw error;
       }
@@ -372,5 +487,15 @@ export class HttpClient {
    */
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private resolveUrl(url: string): string {
+    return url.startsWith('http') ? url : `${this.baseURL}${url.startsWith('/') ? url : `/${url}`}`;
+  }
+}
+
+class InterceptorResponse extends Error {
+  constructor(public response: Response) {
+    super('Interceptor response');
   }
 }
