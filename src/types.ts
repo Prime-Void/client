@@ -4,11 +4,14 @@ import { CircuitBreakerConfig } from './circuit-breaker';
 import { CompressionConfig } from './compression';
 import { CryptoConfig } from './crypto';
 import { DedupConfig } from './dedup';
+import { Http2Config } from './http2';
 import { Logger } from './logger/types';
 import { ProgressConfig } from './progress';
 import { QueueConfig } from './queue/types';
 import { RateLimitConfig } from './rate-limit/types';
+import { SSEConfig } from './sse';
 import { ThrottleConfig } from './throttle';
+import { WebSocketConfig } from './websocket';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
@@ -34,6 +37,9 @@ export interface RequestConfig extends ProgressConfig {
   throttle?: boolean | ThrottleConfig;
   dedup?: boolean | DedupConfig;
   crypto?: boolean | CryptoConfig;
+  http2?: boolean | Http2Config;
+  websocket?: boolean | WebSocketConfig;
+  sse?: boolean | SSEConfig;
 }
 
 export interface ClientConfig {
@@ -51,6 +57,9 @@ export interface ClientConfig {
   throttle?: boolean | ThrottleConfig;
   dedup?: boolean | DedupConfig;
   crypto?: boolean | CryptoConfig;
+  http2?: boolean | Http2Config;
+  websocket?: boolean | WebSocketConfig;
+  sse?: boolean | SSEConfig;
   logger?: Logger;
 }
 
