@@ -1,108 +1,110 @@
-type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS';
-interface PrimeVoidConfig {
-    baseURL?: string;
-    timeout?: number;
-    headers?: Record<string, string>;
-    retries?: number;
-    cache?: boolean;
-    cacheStrategy?: 'memory' | 'localStorage' | 'indexedDB';
-    cacheTTL?: number;
-}
-interface RequestConfig extends Partial<PrimeVoidConfig> {
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+interface RequestConfig {
     method?: HttpMethod;
-    url: string;
-    data?: unknown;
-    params?: Record<string, string | number | boolean | null | undefined>;
+    url?: string;
+    headers?: Record<string, string>;
+    params?: Record<string, string>;
+    timeout?: number;
     signal?: AbortSignal;
+    retries?: number;
+    retryDelay?: number;
+    transformRequest?: RequestTransformer;
+    transformResponse?: ResponseTransformer;
+    data?: unknown;
 }
-interface ResponseBase {
-    status: number;
-    statusText: string;
-    headers: Record<string, string>;
-    config: RequestConfig;
+interface ClientConfig {
+    baseURL?: string;
+    headers?: Record<string, string>;
+    timeout?: number;
+    retries?: number;
+    retryDelay?: number;
 }
-interface Response<T = any> extends ResponseBase {
-    data: T;
+interface RequestInterceptor {
+    onRequest: (config: RequestConfig) => Promise<RequestConfig> | RequestConfig;
+    onRequestError?: (error: unknown) => Promise<unknown>;
 }
-interface PrimeVoidError extends Error {
-    config?: RequestConfig;
-    code?: string;
-    response?: Response;
-    isNetworkError?: boolean;
-    isTimeout?: boolean;
+interface ResponseInterceptor {
+    onResponse: (response: Response) => Promise<Response> | Response;
+    onResponseError?: (error: unknown) => Promise<unknown>;
+}
+type RequestTransformer = (data: unknown) => unknown | Promise<unknown>;
+type ResponseTransformer = (data: unknown, headers: Headers) => unknown | Promise<unknown>;
+declare class HttpError extends Error {
+    readonly status: number;
+    readonly statusText: string;
+    readonly data?: any;
+    readonly config?: RequestConfig | undefined;
+    constructor(status: number, statusText: string, data?: any, config?: RequestConfig | undefined);
 }
 
-declare class PrimeVoidClient {
-    private config;
+/**
+ * A lightweight and modern HTTP client for making API requests
+ */
+declare class HttpClient {
+    private baseURL;
+    private defaultHeaders;
+    private timeout;
+    private retries;
+    private retryDelay;
     private requestInterceptors;
     private responseInterceptors;
-    constructor(config?: PrimeVoidConfig);
+    constructor(config?: ClientConfig);
     /**
-     * Makes a GET request
+     * Add a request interceptor
      */
-    get<T>(url: string, config?: RequestConfig): Promise<Response<T>>;
+    addRequestInterceptor(interceptor: RequestInterceptor): () => void;
     /**
-     * Makes a POST request
+     * Add a response interceptor
      */
-    post<T>(url: string, data?: unknown, config?: RequestConfig): Promise<Response<T>>;
+    addResponseInterceptor(interceptor: ResponseInterceptor): () => void;
     /**
-     * Makes a PUT request
+     * Sends a GET request to the specified URL
      */
-    put<T>(url: string, data?: unknown, config?: RequestConfig): Promise<Response<T>>;
+    get<T>(url: string, config?: RequestConfig): Promise<T>;
     /**
-     * Makes a DELETE request
+     * Sends a POST request to the specified URL with data
      */
-    delete<T>(url: string, config?: RequestConfig): Promise<Response<T>>;
+    post<T>(url: string, data?: unknown, config?: RequestConfig): Promise<T>;
     /**
-     * Makes a PATCH request
+     * Sends a PUT request to the specified URL with data
      */
-    patch<T>(url: string, data?: unknown, config?: RequestConfig): Promise<Response<T>>;
+    put<T>(url: string, data?: unknown, config?: RequestConfig): Promise<T>;
     /**
-     * Makes a HEAD request
+     * Sends a DELETE request to the specified URL
      */
-    head<T>(url: string, config?: RequestConfig): Promise<Response<T>>;
+    delete<T>(url: string, config?: RequestConfig): Promise<T>;
     /**
-     * Makes a OPTIONS request
+     * Sends a PATCH request to the specified URL with data
      */
-    options<T>(url: string, config?: RequestConfig): Promise<Response<T>>;
+    patch<T>(url: string, data?: unknown, config?: RequestConfig): Promise<T>;
     /**
-     * Makes an HTTP request
+     * Core method to make HTTP requests
      */
     private request;
     /**
-     * Makes the actual HTTP request
+     * Apply request interceptors in sequence
      */
-    private makeRequest;
+    private applyRequestInterceptors;
     /**
-     * Builds the full URL for the request
+     * Apply response interceptors in sequence
      */
-    private buildFullUrl;
+    private applyResponseInterceptors;
     /**
-     * Builds headers for the request
-     */
-    private buildHeaders;
-    /**
-     * Builds the request body
-     */
-    private buildBody;
-    /**
-     * Parses the response based on content type
+     * Parse response based on content type
      */
     private parseResponse;
     /**
-     * Parses response headers into a plain object
+     * Builds the final URL with query parameters
      */
-    private parseHeaders;
+    private buildUrl;
     /**
-     * Handles request errors
+     * Determine if a request should be retried
      */
-    private handleError;
+    private shouldRetry;
+    /**
+     * Delay helper for retry mechanism
+     */
+    private delay;
 }
 
-declare function createClient(config?: PrimeVoidConfig): PrimeVoidClient;
-
-declare const _default: {
-    createClient: typeof createClient;
-};
-
-export { PrimeVoidConfig, PrimeVoidError, RequestConfig, Response, createClient, _default as default };
+export { ClientConfig, HttpClient, HttpError, HttpMethod, RequestConfig };

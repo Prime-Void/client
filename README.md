@@ -1,139 +1,163 @@
-# Prime Void
+# Prime Void HTTP Client
 
-🚀 A next-generation JavaScript HTTP client focused on performance, security, and developer experience.
-
-[![npm version](https://img.shields.io/npm/v/@primevoid/client.svg)](https://www.npmjs.com/package/@primevoid/client)
-[![Build Status](https://img.shields.io/travis/Prime-Void/client/master.svg)](https://github.com/Prime-Void/client)
-[![Coverage Status](https://img.shields.io/codecov/c/github/Prime-Void/client.svg)](https://github.com/Prime-Void/client)
-[![Bundle Size](https://img.shields.io/bundlephobia/minzip/@primevoid/client)](https://bundlephobia.com/result?p=@primevoid/client)
+A powerful, type-safe HTTP client for JavaScript/TypeScript with advanced features.
 
 ## Features
 
-- 🚄 **High Performance**: Smart caching, request optimization, and minimal overhead
-- 🛡️ **Enhanced Security**: Built-in protection against CSRF, XSS, and other vulnerabilities
-- 🎯 **Type Safety**: First-class TypeScript support with full type inference
-- 🔄 **Advanced Caching**: Multi-level caching with intelligent invalidation
-- 🌐 **Universal**: Works in browsers, Node.js, and edge environments
-- 🔌 **Extensible**: Rich plugin system and middleware support
-- 📊 **Observable**: Built-in monitoring and debugging tools
+- 🚀 Modern and lightweight
+- 💪 Fully type-safe with TypeScript
+- 🔄 Advanced request/response interceptors
+- 📦 Smart caching system
+- 🔁 Configurable retry mechanism
+- ⚡ Progress tracking
+- 🎯 Request cancellation
+- 🛡️ Comprehensive error handling
+- 🔌 Extensible middleware system
 
 ## Installation
 
 ```bash
-npm install @primevoid/client
-# or
-yarn add @primevoid/client
-# or
-pnpm add @primevoid/client
+npm install prime-void
 ```
 
 ## Quick Start
 
 ```typescript
-import { createClient } from '@primevoid/client';
+import { Client } from 'prime-void';
 
-// Create a client instance
-const client = createClient({
-  baseURL: 'https://api.example.com',
-  // Optional configuration
-  cache: true,
-  retry: true,
-  timeout: 5000,
+const client = new Client({
+    baseURL: 'https://api.example.com',
+    timeout: 5000,
+    retry: {
+        attempts: 3,
+        delay: 1000,
+        backoffType: 'exponential'
+    },
+    cache: {
+        ttl: 60000,
+        storage: 'memory'
+    }
 });
 
-// Make requests
-async function fetchUsers() {
-  try {
-    const response = await client.get('/users', {
-      cache: {
-        ttl: '5m',
-        staleWhileRevalidate: true,
-      },
-    });
-    
-    return response.data;
-  } catch (error) {
-    if (error.isNetworkError) {
-      // Handle network errors
+// Simple GET request
+const response = await client.get('/users');
+
+// POST request with data
+const user = await client.post('/users', {
+    name: 'John Doe',
+    email: 'john@example.com'
+});
+
+// Request with progress tracking
+const response = await client.get('/large-file', {
+    onDownloadProgress: (progress) => {
+        console.log(`Downloaded ${progress.percentage}%`);
     }
-    throw error;
-  }
-}
+});
 ```
 
-## Key Differences from Axios
-
-1. **Performance**
-   - Smart request deduplication
-   - Automatic request batching
-   - Efficient caching strategies
-   - Smaller bundle size
-
-2. **Security**
-   - Enhanced security defaults
-   - Automatic request sanitization
-   - Built-in rate limiting
-   - Modern auth patterns
-
-3. **Developer Experience**
-   - Better TypeScript integration
-   - Rich debugging tools
-   - Comprehensive error handling
-   - Plugin system
-
-## Advanced Usage
+## Advanced Features
 
 ### Caching
 
 ```typescript
-const client = createClient({
-  cache: {
-    storage: 'memory', // or 'localStorage', 'indexedDB'
-    compression: true,
-    maxSize: '100MB',
-    ttl: '1h',
-  },
+const client = new Client({
+    cache: {
+        ttl: 60000, // 1 minute
+        storage: 'localStorage',
+        maxSize: 100,
+        staleWhileRevalidate: true
+    }
+});
+```
+
+### Retry Mechanism
+
+```typescript
+const client = new Client({
+    retry: {
+        attempts: 3,
+        delay: 1000,
+        backoffType: 'exponential',
+        shouldRetry: (error) => error.response?.status >= 500
+    }
 });
 ```
 
 ### Interceptors
 
 ```typescript
-client.interceptors.request.use(
-  (config) => {
-    // Modify requests before they are sent
-    return config;
-  },
-  (error) => {
-    // Handle request errors
-    return Promise.reject(error);
-  }
-);
+client.interceptors.add({
+    id: 'auth',
+    onRequest: async (config) => {
+        config.headers['Authorization'] = 'Bearer token';
+        return config;
+    },
+    onResponse: async (response) => {
+        // Process response
+        return response;
+    }
+});
 ```
 
-### Plugins
+### Middleware
 
 ```typescript
-import { rateLimitPlugin, offlinePlugin } from '@primevoid/plugins';
-
-client.use(rateLimitPlugin({
-  max: 100,
-  windowMs: 60000,
-}));
-
-client.use(offlinePlugin({
-  storage: 'indexedDB',
-}));
+client.middleware.add({
+    id: 'logger',
+    before: async (config) => {
+        console.log('Request:', config);
+        return config;
+    },
+    after: async (response) => {
+        console.log('Response:', response);
+        return response;
+    }
+});
 ```
 
-## Documentation
+### Error Handling
 
-Visit our [website](https://primevoid.com) for detailed guides and API reference.
+```typescript
+try {
+    const response = await client.get('/api/data');
+} catch (error) {
+    if (error instanceof HttpError) {
+        console.error('HTTP Error:', error.response.status);
+    } else if (error instanceof NetworkError) {
+        console.error('Network Error:', error.message);
+    } else if (error instanceof TimeoutError) {
+        console.error('Timeout Error:', error.message);
+    }
+}
+```
 
-## Contributing
+## API Reference
 
-We welcome contributions! Please see our [contributing guide](https://github.com/Prime-Void/client/blob/main/CONTRIBUTING.md) for details.
+### Client Configuration
+
+```typescript
+interface ClientConfig {
+    baseURL?: string;
+    timeout?: number;
+    headers?: Record<string, string>;
+    cache?: CacheConfig | false;
+    retry?: RetryConfig | false;
+    middleware?: Middleware[];
+    interceptors?: Interceptor[];
+}
+```
+
+### Request Methods
+
+- `get<T>(url: string, config?: RequestConfig): Promise<Response<T>>`
+- `post<T>(url: string, data?: any, config?: RequestConfig): Promise<Response<T>>`
+- `put<T>(url: string, data?: any, config?: RequestConfig): Promise<Response<T>>`
+- `patch<T>(url: string, data?: any, config?: RequestConfig): Promise<Response<T>>`
+- `delete<T>(url: string, config?: RequestConfig): Promise<Response<T>>`
+- `head<T>(url: string, config?: RequestConfig): Promise<Response<T>>`
+- `options<T>(url: string, config?: RequestConfig): Promise<Response<T>>`
 
 ## License
 
-MIT License - see the [LICENSE](https://github.com/Prime-Void/client/blob/main/LICENSE) file for details
+MIT
